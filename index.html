@@ -197,7 +197,8 @@
             <!-- Cards will be appended here -->
         </div>
         <div class="input-display" id="feedback">Start Typing...</div>
-        <div class="instructions">Type Romaji to deal • BACKSPACE to undo • SPACE to clear all</div>
+        <div class="instructions">Type Romaji to deal • BACKSPACE to undo • ENTER to reveal • SPACE to clear<br>SHIFT:
+            Katakana • CAPSLOCK: Word Mode</div>
     </div>
     <script>
         const hiraganaData = [
@@ -243,6 +244,8 @@
         ];
 
         let userInput = '';
+        let lastShiftState = false;
+        let lastCapsLockState = false;
         const tableElement = document.getElementById('game-table');
         const feedbackElement = document.getElementById('feedback');
         let audioCtx;
@@ -308,10 +311,14 @@
 
         function initGame() {
             document.addEventListener('keydown', handleInput);
-            document.addEventListener('click', initAudio); // Unlock audio context
+            document.addEventListener('keyup', (e) => {
+                // Update CapsLock state on any key up as well
+                lastCapsLockState = e.getModifierState('CapsLock');
+            });
+            document.addEventListener('click', initAudio);
         }
 
-        function addCard(cardData, isKatakana = false, isRed = false) {
+        function addCard(cardData, isKatakana = false, isRed = false, isWordMode = false) {
             playSnapSound();
 
             const card = document.createElement('div');
@@ -354,19 +361,16 @@
             card.appendChild(cornerBR);
 
             // Reveal the previous card's Romaji
-            const existingCards = tableElement.querySelectorAll('.card');
-            if (existingCards.length > 0) {
-                const lastCard = existingCards[existingCards.length - 1];
-                lastCard.classList.add('revealed');
+            // If NOT in Word Mode (CapsLock), reveal the previous card
+            if (!isWordMode) {
+                const existingCards = tableElement.querySelectorAll('.card');
+                if (existingCards.length > 0) {
+                    const lastCard = existingCards[existingCards.length - 1];
+                    lastCard.classList.add('revealed');
+                }
             }
 
             tableElement.appendChild(card);
-
-            // Auto scroll or center adjustment
-            // Since we are centered with flex-content: center, the browser handles it,
-            // but we might want to ensure the latest card is visible if overflow happens?
-            // With justify-content: center, overflow-x hidden, it might clip the edges.
-            // For now, let flexbox handle it.
         }
 
         function clearTable() {
@@ -376,31 +380,21 @@
                 setTimeout(() => {
                     card.classList.remove('deal-animation');
                     card.classList.add('clear-animation');
-                }, index * 50); // Staggered clear
+                }, index * 50);
             });
-
-            // Remove from DOM after animation
-            setTimeout(() => {
-                tableElement.innerHTML = '';
-            }, cards.length * 50 + 300);
+            setTimeout(() => { tableElement.innerHTML = ''; }, cards.length * 50 + 300);
         }
 
         function removeLastCard() {
             const cards = tableElement.querySelectorAll('.card');
             if (cards.length === 0) return;
-
             const lastCard = cards[cards.length - 1];
             lastCard.classList.remove('deal-animation');
             lastCard.classList.add('clear-animation');
-
-            // Hide Romaji of the card before this one (it becomes the new last card)
             if (cards.length >= 2) {
                 const newLastCard = cards[cards.length - 2];
                 newLastCard.classList.remove('revealed');
             }
-
-            // Simple sound for single remove?
-            // Reuse snap but lower pitch?
             if (audioCtx) {
                 const oscillator = audioCtx.createOscillator();
                 const gainNode = audioCtx.createGain();
@@ -414,109 +408,91 @@
                 oscillator.start();
                 oscillator.stop(audioCtx.currentTime + 0.1);
             }
-
-            setTimeout(() => {
-                if (lastCard.parentNode) {
-                    lastCard.parentNode.removeChild(lastCard);
-                }
-            }, 300);
-        }
-
-        function handleInput(e) {
-            initAudio();
-
-            if (e.isComposing || e.keyCode === 229) return;
-
-            // Clear All (Space)
-            if (e.key === ' ') {
-                e.preventDefault(); // Prevent scrolling
-                userInput = '';
-                updateFeedback();
-                clearTable();
-                return;
-            }
-
-            // Remove Last Card (Backspace)
-            if (e.key === 'Backspace') {
-                userInput = userInput.slice(0, -1);
-                updateFeedback();
-
-                // If user input was empty, remove a card from the table
-                if (userInput.length === 0) {
-                    removeLastCard();
-                }
-                return;
-            }
-
-            if (e.key === 'Escape') {
-                userInput = '';
-                updateFeedback();
-                return;
-            }
-
-            // Allow alphabets, hyphen, and '0' for red mode
-            if (e.key.length === 1 && (/^[a-zA-Z0]$/.test(e.key) || e.key === '-') && !e.ctrlKey && !e.altKey && !e.metaKey) {
-                // Preserve case to detect Shift usage
-                userInput += e.key;
-                updateFeedback();
-                processInput();
-            }
+            setTimeout(() => { if (lastCard.parentNode) lastCard.parentNode.removeChild(lastCard); }, 300);
         }
 
         function updateFeedback() {
+            const modeText = lastCapsLockState ? ' [Word Mode]' : '';
             if (userInput.length === 0) {
-                feedbackElement.textContent = 'Start Typing...';
-                feedbackElement.style.color = '#fff';
+                feedbackElement.textContent = lastCapsLockState ? 'WORD MODE ACTIVE' : 'Start Typing...';
+                feedbackElement.style.color = 'rgba(255,255,255,0.6)';
             } else {
-                feedbackElement.textContent = userInput;
-                feedbackElement.style.color = '#fff'; // Always white
+                feedbackElement.textContent = userInput + modeText;
+                feedbackElement.style.color = '#fff';
             }
         }
 
         function processInput() {
-            // Check for '0' prefix (Red Mode)
             let processingInput = userInput;
             let isRed = false;
-
             if (processingInput.startsWith('0')) {
                 isRed = true;
-                processingInput = processingInput.slice(1); // Remove '0' for matching
-                if (processingInput.length === 0) return; // Only '0' typed so far
+                processingInput = processingInput.slice(1);
+                if (processingInput.length === 0) return;
             }
-
             const lowerInput = processingInput.toLowerCase();
-
-            // Find matches using lowercase for robustness
             const exactMatches = hiraganaData.filter(d => d.romaji.includes(lowerInput));
-
             if (exactMatches.length > 0) {
-                // Check if user typed capital letters in the core part (Katakana Mode)
-                const isKatakana = /[A-Z]/.test(processingInput);
-
-                // Show Card
-                addCard(exactMatches[0], isKatakana, isRed);
-
-                // Reset Input
+                addCard(exactMatches[0], lastShiftState, isRed, lastCapsLockState);
                 userInput = '';
                 updateFeedback();
                 return;
             }
-
-            // Check if valid prefix (lowercase)
             const prefixMatches = hiraganaData.filter(d => d.romaji.some(r => r.startsWith(lowerInput)));
-
-            // Only consider it invalid if parsing the core part fails logic
             if (prefixMatches.length === 0) {
-                // Visual error feedback on text only
                 feedbackElement.style.color = 'var(--accent-color)';
-                // Prevent invalid input accumulation? Or just show red?
-                // Let's strip invalid char
                 setTimeout(() => {
                     if (userInput.length > 0) {
                         userInput = userInput.slice(0, -1);
                         updateFeedback();
                     }
                 }, 200);
+            }
+        }
+
+        function handleInput(e) {
+            initAudio();
+            lastShiftState = e.shiftKey;
+            lastCapsLockState = e.getModifierState('CapsLock');
+            if (e.isComposing || e.keyCode === 229) return;
+            if (e.key === ' ') {
+                e.preventDefault();
+                userInput = '';
+                updateFeedback();
+                clearTable();
+                return;
+            }
+            if (e.key === 'Backspace') {
+                userInput = userInput.slice(0, -1);
+                updateFeedback();
+                if (userInput.length === 0) removeLastCard();
+                return;
+            }
+            if (e.key === 'Enter') {
+                userInput = '';
+                updateFeedback();
+                const cards = tableElement.querySelectorAll('.card');
+                let anyRevealed = false;
+                cards.forEach(card => {
+                    if (!card.classList.contains('revealed')) {
+                        card.classList.add('revealed');
+                        anyRevealed = true;
+                    }
+                });
+                if (anyRevealed) playSnapSound();
+                return;
+            }
+            if (e.key === 'Escape') {
+                userInput = '';
+                updateFeedback();
+                return;
+            }
+            if (e.key.length === 1 && (/^[a-zA-Z0]$/.test(e.key) || e.key === '-') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                userInput += e.key;
+                updateFeedback();
+                processInput();
+            } else {
+                updateFeedback();
             }
         }
 
